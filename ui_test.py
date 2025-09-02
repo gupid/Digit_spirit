@@ -4,16 +4,18 @@ import threading
 import time
 import psutil
 from pynput import keyboard, mouse
+import os
+import csv
+import datetime
+# 新增：导入 pynvml 模块
+import pynvml
 
-# 1. 修改：关闭开启录制
 record_on_flag = False
 
-# 2. 修改：更新回调函数，使其能改变按钮文字
 def switch_record_cb():
     global record_on_flag
     record_on_flag = not record_on_flag
     
-    # 根据新的状态，更新按钮的文本
     if record_on_flag:
         on_off_button.config(text="结束")
     else:
@@ -27,9 +29,17 @@ class Recorder:
         self.label_var = label_var
         self.mouse_listener = None
         self.keyboard_listener = None
-        self.cpu_thread = None
+        self.stats_thread = None # 修改：线程变量重命名
         self.stop_event = threading.Event()
         self.running = False
+        self.output_filename = "system_log.csv"
+        self.gpu_handle = None
+        try:
+            pynvml.nvmlInit()
+            self.gpu_handle = pynvml.nvmlDeviceGetHandleByIndex(0)
+            print("NVIDIA GPU found and initialized.")
+        except Exception as e:
+            print(f"Warning: Could not initialize NVIDIA GPU monitoring. Error: {e}")
 
     def on_click(self, x, y, button, pressed):
         current_label = self.label_var.get()
@@ -45,23 +55,47 @@ class Recorder:
         except AttributeError:
             print(f"[{current_label}] Special key {key} pressed")
 
-    def cpu_worker(self):
+    def system_stats_worker(self):
         while not self.stop_event.is_set():
             cpu_usage = psutil.cpu_percent(interval=1)
             ram_usage = psutil.virtual_memory().percent
+            
+            gpu_usage = -1 # 默认值-1，代表未获取到
+            if self.gpu_handle:
+                try:
+                    gpu_util = pynvml.nvmlDeviceGetUtilizationRates(self.gpu_handle)
+                    gpu_usage = gpu_util.gpu
+                except Exception as e:
+                    print(f"Could not get GPU usage: {e}")
+
+            # 准备要写入文件的数据
+            timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             current_label = self.label_var.get()
-            print(f"[{current_label}] CPU Usage: {cpu_usage}%, RAM Usage: {ram_usage}%")
+            data_row = [timestamp, cpu_usage, ram_usage, gpu_usage, current_label]
+            
+            # 使用'a'模式（append）来不覆盖地追加写入
+            with open(self.output_filename, 'a', newline='', encoding='utf-8') as f:
+                writer = csv.writer(f)
+                writer.writerow(data_row)
+            
+            print(f"Data recorded: {data_row}")
 
     def start(self):
         if self.running:
             return
+        
+        if not os.path.exists(self.output_filename):
+            with open(self.output_filename, 'w', newline='', encoding='utf-8') as f:
+                writer = csv.writer(f)
+                writer.writerow(['timestamp', 'cpu_percent', 'ram_percent', 'gpu_percent','label'])
+
         self.stop_event.clear()
         self.mouse_listener = mouse.Listener(on_click=self.on_click)
         self.keyboard_listener = keyboard.Listener(on_press=self.on_press)
         self.mouse_listener.start()
         self.keyboard_listener.start()
-        self.cpu_thread = threading.Thread(target=self.cpu_worker, daemon=True)
-        self.cpu_thread.start()
+        self.stats_thread = threading.Thread(target=self.system_stats_worker, daemon=True)
+        self.stats_thread.start()
         self.running = True
         print(f"Recorder started with label '{self.label_var.get()}'")
 
@@ -69,6 +103,14 @@ class Recorder:
         if not self.running:
             return
         self.stop_event.set()
+        
+        if self.gpu_handle:
+            try:
+                pynvml.nvmlShutdown()
+                print("NVML shut down.")
+            except:
+                pass
+
         if self.mouse_listener is not None:
             try:
                 self.mouse_listener.stop()
@@ -83,6 +125,7 @@ class Recorder:
             self.keyboard_listener = None
         self.running = False
         print("Recorder stopped")
+
 
 def on_resize(event):
     base = min(event.width, event.height)
@@ -110,7 +153,6 @@ if __name__ == "__main__":
     coding_radio.pack(side="left")
     gaming_radio.pack(side="left")
 
-    # 3. 修改：按钮的初始文本设为“结束”
     on_off_button = tk.Button(root, text="开始", command=switch_record_cb, font=btn_font)
     on_off_button.pack(fill="both", expand=True, padx=20, pady=(0, 20))
    
