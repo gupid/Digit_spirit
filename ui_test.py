@@ -8,6 +8,7 @@ import os
 import csv
 import datetime
 import pynvml
+import collections # 导入collections模块以使用deque
 
 class Recorder:
     """
@@ -34,6 +35,8 @@ class Recorder:
         self.mouse_right_clicks = 0
         self.mouse_scroll_amount = 0
         self.keyboard_counts = 0
+        
+        self.data_buffer = collections.deque(maxlen=5)
         
         # 性能与同步
         self.data_lock = threading.Lock()
@@ -75,9 +78,19 @@ class Recorder:
 
     def system_stats_worker(self):
         """后台线程，每秒采集一次数据并写入文件。"""
+        # 使用'a'模式打开文件，确保在程序多次启动和停止时不会覆盖旧数据
+        try:
+            file = open(self.output_filename, 'a', newline='', encoding='utf-8')
+            writer = csv.writer(file)
+        except IOError as e:
+            error_msg = f"错误: 无法打开文件 {self.output_filename}"
+            self.status_var.set(error_msg)
+            print(f"{error_msg}. Reason: {e}")
+            return # 如果文件无法打开，则终止工作线程
+
         while not self.stop_event.is_set():
-            # 1. 采集系统数据
-            cpu_usage = psutil.cpu_percent(interval=1)
+            # 1. 采集系统数据 (为了避免等待1秒，我们将interval设为None，然后在循环末尾sleep)
+            cpu_usage = psutil.cpu_percent(interval=None) 
             ram_usage = psutil.virtual_memory().percent
             gpu_usage, gpu_vram_usage = -1, -1
             if self.gpu_handle:
@@ -92,19 +105,19 @@ class Recorder:
             # 2. 采集用户输入数据
             with self.data_lock:
                 mouse_distance_sum = sum(((p2[0] - p1[0])**2 + (p2[1] - p1[1])**2)**0.5 for p1, p2 in zip(self.mouse_locations, self.mouse_locations[1:]))
-                
                 left_clicks = self.mouse_left_clicks
                 right_clicks = self.mouse_right_clicks
                 scroll_amount = self.mouse_scroll_amount
                 keyboard_hits = self.keyboard_counts
                 
+                # 重置数据
                 self.mouse_locations.clear()
                 self.mouse_left_clicks = 0
                 self.mouse_right_clicks = 0
                 self.mouse_scroll_amount = 0
                 self.keyboard_counts = 0
 
-            # 3. 准备并写入数据行
+            # 3. 准备数据行
             timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             current_label = self.label_var.get()
             data_row = [
@@ -113,22 +126,62 @@ class Recorder:
                 current_label
             ]
             
-            try:
-                with open(self.output_filename, 'a', newline='', encoding='utf-8') as f:
-                    writer = csv.writer(f)
-                    writer.writerow(data_row)
-                self.status_var.set(f"数据已记录于 {timestamp}")
-                print(f"Data recorded: {data_row}")
-            except IOError as e:
-                error_msg = f"错误: 无法写入文件 {self.output_filename}"
-                self.status_var.set(error_msg)
-                print(f"{error_msg}. Reason: {e}")
+            # 如果缓冲区已满 (5条记录)，则将最旧的记录写入文件
+            if len(self.data_buffer) == self.data_buffer.maxlen:
+                oldest_data = self.data_buffer[0] # 获取最旧的数据
+                writer.writerow(oldest_data)
+                self.status_var.set(f"数据已记录于 {oldest_data[0]}")
+                print(f"Data recorded: {oldest_data}")
+
+            # 将新数据添加到缓冲区的右侧
+            self.data_buffer.append(data_row)
+            
+            # 等待1秒钟，完成每秒采集一次的循环
+            time.sleep(1)
+
+        print("Flushing remaining data from buffer...")
+        for row in self.data_buffer:
+            writer.writerow(row)
+            print(f"Flushed data: {row}")
+        self.data_buffer.clear()
+        file.close() # 关闭文件
+
+    def _delayed_start_worker(self):
+        """在后台等待5秒，然后启动监听器和数据采集线程。"""
+        # 倒计时
+        for i in range(5, 0, -1):
+            # 检查在倒计时期间用户是否取消了操作
+            if not self.running:
+                print("Recording cancelled during countdown.")
+                self.status_var.set("记录已取消")
+                return
+            self.status_var.set(f"{i}秒后开始记录...")
+            time.sleep(1)
+        
+        # 再次检查，以防在最后1秒内取消
+        if not self.running:
+            print("Recording cancelled just before start.")
+            self.status_var.set("记录已取消")
+            return
+
+        self.status_var.set(f"开始记录 '{self.label_var.get()}'...")
+        print(f"Recorder started with label '{self.label_var.get()}'")
+
+        # 启动监听器
+        self.mouse_listener = mouse.Listener(on_click=self.on_click, on_move=self.on_move, on_scroll=self.on_scroll)
+        self.keyboard_listener = keyboard.Listener(on_press=self.on_press)
+        self.mouse_listener.start()
+        self.keyboard_listener.start()
+        
+        # 启动数据采集线程
+        self.stats_thread = threading.Thread(target=self.system_stats_worker, daemon=True)
+        self.stats_thread.start()
 
     def start(self):
         if self.running: return
         self.running = True
-        self.status_var.set(f"开始记录 '{self.label_var.get()}'...")
-
+        
+        # 确保CSV文件头存在
         if not os.path.exists(self.output_filename):
             with open(self.output_filename, 'w', newline='', encoding='utf-8') as f:
                 writer = csv.writer(f)
@@ -137,28 +190,30 @@ class Recorder:
                     'keyboard_counts','cpu_percent', 'ram_percent', 'gpu_percent','gpu_vram_percent',
                     'label'
                 ])
-
+        
         self.stop_event.clear()
-        self.mouse_listener = mouse.Listener(on_click=self.on_click, on_move=self.on_move, on_scroll=self.on_scroll)
-        self.keyboard_listener = keyboard.Listener(on_press=self.on_press)
-        self.mouse_listener.start()
-        self.keyboard_listener.start()
-        self.stats_thread = threading.Thread(target=self.system_stats_worker, daemon=True)
-        self.stats_thread.start()
-        print(f"Recorder started with label '{self.label_var.get()}'")
+        self.data_buffer.clear() # 每次开始前清空缓冲区
+        
+        # 启动一个新线程来处理5秒的延迟，以避免阻塞GUI
+        delay_thread = threading.Thread(target=self._delayed_start_worker, daemon=True)
+        delay_thread.start()
 
     def stop(self):
         if not self.running: return
-        self.running = False
+        self.running = False # 立即设置状态，这可以让延迟启动的倒计时中断
         self.status_var.set("正在停止记录...")
 
         self.stop_event.set()
         if self.mouse_listener: self.mouse_listener.stop()
         if self.keyboard_listener: self.keyboard_listener.stop()
-        if self.stats_thread: self.stats_thread.join(timeout=2)
+        if self.stats_thread: self.stats_thread.join(timeout=2) # 等待线程将缓冲区数据写完
+        
         if self.gpu_handle:
-            pynvml.nvmlShutdown()
-            print("NVML shut down.")
+            try:
+                pynvml.nvmlShutdown()
+                print("NVML shut down.")
+            except pynvml.NVMLError as e:
+                print(f"Error shutting down NVML: {e}")
         
         self.status_var.set("记录已停止")
         print("Recorder stopped")
