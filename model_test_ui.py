@@ -142,7 +142,6 @@ class StatusPredictorUI(tk.Tk):
             new_row = pd.DataFrame([raw_data], columns=RAW_DATA_COLUMNS)
             new_row['timestamp'] = current_time
             
-            # 【代码优化】修复FutureWarning，让代码更稳健
             if self.data_buffer.empty:
                 self.data_buffer = new_row
             else:
