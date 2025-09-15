@@ -5,10 +5,22 @@ import time
 import joblib
 import pandas as pd
 from model_test import Recorder
+import sys
+import os
+
 
 # --- 全局配置 ---
-MODEL_PATH = 'xgboost_model.joblib'
-ENCODER_PATH = 'label_encoder.joblib'
+# 判断程序是否被打包（作为exe运行）
+if getattr(sys, 'frozen', False):
+    # 如果是打包后的exe，则基准路径是exe所在的临时目录
+    base_path = sys._MEIPASS
+else:
+    # 如果是直接作为.py脚本运行，则基准路径是脚本文件所在的目录
+    base_path = os.path.dirname(os.path.abspath(__file__))
+
+# 使用os.path.join来构建绝对路径，确保能找到文件
+MODEL_PATH = os.path.join(base_path, 'xgboost_model.joblib')
+ENCODER_PATH = os.path.join(base_path, 'label_encoder.joblib')
 PREDICTION_INTERVAL_MS = 1000
 DATA_BUFFER_SECONDS = 30
 
