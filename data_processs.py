@@ -13,7 +13,7 @@ file_paths = [
     'train_data/system_log_9_5.csv',
     'train_data/system_log_9_8.csv',
     'train_data/system_log_9_9.csv',
-    'train_data/system_log_9_13.csv',
+    #'train_data/system_log_9_13.csv',
 ]
 
 # 2. 使用列表推导式和循环来读取和处理所有文件
