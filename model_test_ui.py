@@ -24,14 +24,16 @@ DATA_BUFFER_SECONDS = 30
 FINAL_FEATURE_COLUMNS = [
     'cpu_percent', 'ram_percent', 'gpu_percent', 'gpu_vram_percent',
     'mouse_left_click_freq', 'mouse_right_click_freq', 'mouse_scroll_freq',
-    'keyboard_counts_freq', 'mouse_distance_freq'
+    'keyboard_counts_freq', 'mouse_distance_freq','bytes_sent_per_sec_freq', 'bytes_recv_per_sec_freq', 'packets_sent_per_sec_freq', 'packets_recv_per_sec_freq',
+    'read_bytes_per_sec_freq', 'write_bytes_per_sec_freq'
 ]
 
 # 原始数据列
 RAW_DATA_COLUMNS = [
     'mouse_distance', 'mouse_left_click', 'mouse_right_click',
     'mouse_scroll', 'keyboard_counts', 'cpu_percent',
-    'ram_percent', 'gpu_percent', 'gpu_vram_percent'
+    'ram_percent', 'gpu_percent', 'gpu_vram_percent','bytes_sent_per_sec', 'bytes_recv_per_sec', 'packets_sent_per_sec', 'packets_recv_per_sec',
+    'read_bytes_per_sec', 'write_bytes_per_sec'
 ]
 
 class StatusPredictorApp:
@@ -158,7 +160,7 @@ class StatusPredictorApp:
             self.status_label.value = "状态: 监控中..."
             self.calibrate_button.disabled = True
             asyncio.create_task(self.predict_loop())
-        await self.page.update_async()
+        self.page.update()
 
     async def start_calibration(self, e):
         if self.is_running:
@@ -167,18 +169,18 @@ class StatusPredictorApp:
         
         self.calibrate_button.disabled = True
         self.control_button.disabled = True
-        await self.page.update_async()
+        self.page.update()
         
         asyncio.create_task(self.calibrate_idle())
 
     async def calibrate_idle(self):
         for i in range(5, 0, -1):
             self.status_label.value = f"状态: {i}秒后开始校准..."
-            await self.page.update_async()
+            self.page.update()
             await asyncio.sleep(1)
         
         self.status_label.value = "状态: 正在校准...请保持空闲"
-        await self.page.update_async()
+        self.page.update()
         
         calib_monitor = Recorder()
         calib_monitor.start()
@@ -213,7 +215,7 @@ class StatusPredictorApp:
         
         self.calibrate_button.disabled = False
         self.control_button.disabled = False
-        await self.page.update_async()
+        self.page.update()
 
     def _get_window_title_info(self):
         """获取前景窗口标题并更新UI"""
@@ -255,7 +257,7 @@ class StatusPredictorApp:
 
                 if len(self.data_buffer) < 5:
                     self.predicted_status_label.value = f"收集中 {len(self.data_buffer)}/5"
-                    await self.page.update_async()
+                    self.page.update()
                     await asyncio.sleep(PREDICTION_INTERVAL_MS / 1000)
                     continue
 
@@ -268,7 +270,13 @@ class StatusPredictorApp:
                     'mouse_left_click_freq': recent_data['mouse_left_click'].sum(),
                     'mouse_right_click_freq': recent_data['mouse_right_click'].sum(),
                     'mouse_scroll_freq': recent_data['mouse_scroll'].sum(),
-                    'keyboard_counts_freq': recent_data['keyboard_counts'].sum()
+                    'keyboard_counts_freq': recent_data['keyboard_counts'].sum(),
+                    'bytes_sent_per_sec_freq': recent_data['bytes_sent_per_sec'].sum(),
+                    'bytes_recv_per_sec_freq': recent_data['bytes_recv_per_sec'].sum(),
+                    'packets_sent_per_sec_freq': recent_data['packets_sent_per_sec'].sum(),
+                    'packets_recv_per_sec_freq': recent_data['packets_recv_per_sec'].sum(),
+                    'read_bytes_per_sec_freq': recent_data['read_bytes_per_sec'].sum(),
+                    'write_bytes_per_sec_freq': recent_data['write_bytes_per_sec'].sum(),
                 }
                 
                 # [逻辑修复] 处理校准值为-1的情况
@@ -284,31 +292,26 @@ class StatusPredictorApp:
                 model_prediction = self.label_encoder.inverse_transform(prediction_numeric)[0]
 
                 final_prediction = ""
-                # 步骤 3: 决策 - 空闲状态优先
-                if model_prediction == 'idle':
-                    final_prediction = "IDLE"
-                else:
-                    # 步骤 4: 决策 - 字典规则
-                    dict_label = None
-                    for key_title, label in self.windows_dictionary.items():
-                        if key_title.lower() in window_title.lower():
-                            dict_label = label
-                            break
-                    
-                    if dict_label:
-                        final_prediction = dict_label
-                    else:
-                        # 步骤 5: 决策 - 模型兜底
-                        final_prediction = model_prediction
+
+                dict_label = None
+                for key_title, label in self.windows_dictionary.items():
+                    if key_title.lower() in window_title.lower():
+                        dict_label = label
+                        break                  
+                # if dict_label:
+                #     final_prediction = dict_label
+                # else:
+                #     # 步骤 5: 决策 - 模型兜底
+                final_prediction = model_prediction                
                 
                 # 更新UI
                 self.predicted_status_label.value = final_prediction.upper()
-                await self.page.update_async()
+                self.page.update()
 
             except Exception as e:
                 print(f"Error in predict_loop: {e}")
                 self.predicted_status_label.value = "错误"
-                await self.page.update_async()
+                self.page.update()
 
             await asyncio.sleep(PREDICTION_INTERVAL_MS / 1000)
 
@@ -320,11 +323,11 @@ class StatusPredictorApp:
         )
         self.page.dialog = dialog
         dialog.open = True
-        await self.page.update_async()
+        self.page.update()
 
     async def close_dialog(self, e):
         self.page.dialog.open = False
-        await self.page.update_async()
+        self.page.update()
 
     async def on_window_event(self, e):
         if e.data == "close":
@@ -344,7 +347,7 @@ class StatusPredictorApp:
                     ft.Text(f" -> 标签: {label}"),
                 ], alignment=ft.MainAxisAlignment.START)
             )
-        await self.page.update_async()
+        self.page.update()
 
     async def save_dict_to_csv(self):
         df_to_save = pd.DataFrame(list(self.windows_dictionary.items()), columns=['title', 'label'])
@@ -361,7 +364,7 @@ class StatusPredictorApp:
         if not key or not value:
             self.dict_key_input.error_text = "关键词不能为空" if not key else None
             self.dict_value_input.error_text = "标签不能为空" if not value else None
-            await self.page.update_async()
+            self.page.update()
             return
 
         self.dict_key_input.error_text, self.dict_value_input.error_text = None, None

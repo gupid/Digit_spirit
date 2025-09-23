@@ -10,10 +10,11 @@ def process_dataframe(df):
 
 # 1. 将所有需要处理的文件路径放入一个列表
 file_paths = [
-    'train_data/system_log_9_5.csv',
-    'train_data/system_log_9_8.csv',
-    'train_data/system_log_9_9.csv',
+    #'train_data/system_log_9_5.csv',
+    #'train_data/system_log_9_8.csv',
+    #'train_data/system_log_9_9.csv',
     #'train_data/system_log_9_13.csv',
+    'train_data/system_log_9_22.csv',
 ]
 
 # 2. 使用列表推导式和循环来读取和处理所有文件

@@ -27,7 +27,7 @@ class Recorder:
         
         # 状态与配置
         self.running = False
-        self.output_filename = "train_data/system_log_9_13.csv"
+        self.output_filename = "train_data/system_log_9_22.csv"
         
         # 数据采集变量
         self.mouse_locations = []
@@ -42,6 +42,14 @@ class Recorder:
         self.data_lock = threading.Lock()
         self.last_move_time = 0
         self.throttle_time = 0.1
+
+        # 网络与磁盘
+        self.bytes_sent_prev = 0
+        self.bytes_recv_prev = 0
+        self.packets_sent_prev = 0
+        self.packets_recv_prev = 0
+        self.read_bytes_prev = 0
+        self.write_bytes_prev = 0
 
         # GPU 初始化
         self.gpu_handle = None
@@ -116,13 +124,38 @@ class Recorder:
                 self.mouse_right_clicks = 0
                 self.mouse_scroll_amount = 0
                 self.keyboard_counts = 0
+            
+            net_io_now = psutil.net_io_counters()
+            disk_io_now = psutil.disk_io_counters()
+            
+            if self.bytes_recv_prev == 0:
+                bytes_sent_per_sec = 0
+                bytes_recv_per_sec = 0
+                packets_sent_per_sec = 0
+                packets_recv_per_sec = 0
+                read_bytes_per_sec = 0
+                write_bytes_per_sec = 0
+            else:
+                bytes_sent_per_sec = net_io_now.bytes_sent - self.bytes_sent_prev
+                bytes_recv_per_sec = net_io_now.bytes_recv - self.bytes_recv_prev
+                packets_sent_per_sec = net_io_now.packets_sent - self.packets_sent_prev
+                packets_recv_per_sec = net_io_now.packets_recv - self.packets_recv_prev
+                read_bytes_per_sec = disk_io_now.read_bytes - self.read_bytes_prev
+                write_bytes_per_sec = disk_io_now.write_bytes - self.write_bytes_prev
+            self.bytes_sent_prev = net_io_now.bytes_sent
+            self.bytes_recv_prev = net_io_now.bytes_recv
+            self.packets_sent_prev = net_io_now.packets_sent
+            self.packets_recv_prev = net_io_now.packets_recv
+            self.read_bytes_prev = disk_io_now.read_bytes
+            self.write_bytes_prev = disk_io_now.write_bytes
 
             # 3. 准备数据行
             timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             current_label = self.label_var.get()
             data_row = [
                 timestamp, mouse_distance_sum, left_clicks, right_clicks, scroll_amount, 
-                keyboard_hits, cpu_usage, ram_usage, gpu_usage, gpu_vram_usage,
+                keyboard_hits, cpu_usage, ram_usage, gpu_usage, gpu_vram_usage,bytes_sent_per_sec, bytes_recv_per_sec, packets_sent_per_sec, packets_recv_per_sec,
+                read_bytes_per_sec, write_bytes_per_sec,
                 current_label
             ]
             
@@ -172,6 +205,10 @@ class Recorder:
         self.keyboard_listener = keyboard.Listener(on_press=self.on_press)
         self.mouse_listener.start()
         self.keyboard_listener.start()
+
+        #网络、磁盘
+        self.net_io = psutil.net_io_counters()
+        self.disk_io = psutil.disk_io_counters()
         
         # 启动数据采集线程
         self.stats_thread = threading.Thread(target=self.system_stats_worker, daemon=True)
@@ -187,7 +224,8 @@ class Recorder:
                 writer = csv.writer(f)
                 writer.writerow([
                     'timestamp', 'mouse_distance', 'mouse_left_click', 'mouse_right_click', 'mouse_scroll',
-                    'keyboard_counts','cpu_percent', 'ram_percent', 'gpu_percent','gpu_vram_percent',
+                    'keyboard_counts','cpu_percent', 'ram_percent', 'gpu_percent','gpu_vram_percent','bytes_sent_per_sec', 'bytes_recv_per_sec', 'packets_sent_per_sec', 'packets_recv_per_sec',
+                    'read_bytes_per_sec', 'write_bytes_per_sec',
                     'label'
                 ])
         
