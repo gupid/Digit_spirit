@@ -293,16 +293,24 @@ class StatusPredictorApp:
 
                 final_prediction = ""
 
-                dict_label = None
+                dict_label_find = []
+                dict_label = ""
                 for key_title, label in self.windows_dictionary.items():
                     if key_title.lower() in window_title.lower():
-                        dict_label = label
-                        break                  
-                # if dict_label:
-                #     final_prediction = dict_label
-                # else:
-                #     # 步骤 5: 决策 - 模型兜底
-                final_prediction = model_prediction                
+                        dict_label_find.append(label)                 
+                if dict_label_find:
+                    for label in dict_label_find:
+                        if label == 'video':
+                            dict_label = 'video'
+                            break
+                        else:
+                            dict_label = label
+                    if dict_label == 'gaming' and model_prediction == 'video':
+                        dict_label = 'video' 
+                    final_prediction = dict_label
+                else:
+                    # 步骤 5: 决策 - 模型兜底
+                    final_prediction = model_prediction                
                 
                 # 更新UI
                 self.predicted_status_label.value = final_prediction.upper()
