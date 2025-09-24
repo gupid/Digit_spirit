@@ -27,7 +27,7 @@ class Recorder:
         
         # 状态与配置
         self.running = False
-        self.output_filename = "train_data/system_log_9_22.csv"
+        self.output_filename = "train_data/system_log_9_24.csv"
         
         # 数据采集变量
         self.mouse_locations = []
